@@ -1,0 +1,26 @@
+{
+  "name": "neoj4",
+  "version": "1.0.0",
+  "description": "Proof of concept completo de **Neo4j** (base de datos orientada a grafos) usando un catálogo de juego RPG como dominio de datos. El objetivo es analizar las capacidades de Neo4j: modelo de datos, lenguaje de consulta Cypher, algoritmos de grafos (GDS) e integración Python.",
+  "main": "index.js",
+  "directories": {
+    "example": "examples"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monghithub/pocNeo4J.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/monghithub/pocNeo4J/issues"
+  },
+  "homepage": "https://github.com/monghithub/pocNeo4J#readme",
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}
