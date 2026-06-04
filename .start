@@ -1,0 +1,3 @@
+#!/bin/bash
+cd /home/monghit/titan/neoj4
+docker compose up -d
