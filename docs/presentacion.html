@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neo4j PoC — Base de datos orientada a grafos</title>
+<style>
+  :root {
+    --neo4j:    #018BFF;
+    --neo4j-d:  #005FCC;
+    --bg:       #0d1117;
+    --bg2:      #161b22;
+    --bg3:      #21262d;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --green:    #3fb950;
+    --yellow:   #d29922;
+    --red:      #f85149;
+    --purple:   #bc8cff;
+    --cyan:     #39d0d8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── progress bar ── */
+  #progress {
+    position: fixed; top: 0; left: 0;
+    height: 3px; background: var(--neo4j);
+    transition: width .3s ease; z-index: 100;
+  }
+
+  /* ── slide counter ── */
+  #counter {
+    position: fixed; top: 12px; right: 20px;
+    font-size: 12px; color: var(--muted);
+    z-index: 100; letter-spacing: 1px;
+  }
+
+  /* ── nav buttons ── */
+  .nav {
+    position: fixed; top: 50%; transform: translateY(-50%);
+    background: rgba(255,255,255,.05);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    width: 40px; height: 60px;
+    border-radius: 6px; font-size: 18px;
+    cursor: pointer; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .2s;
+  }
+  .nav:hover { background: rgba(1,139,255,.2); color: var(--neo4j); border-color: var(--neo4j); }
+  #prev { left: 10px; }
+  #next { right: 10px; }
+
+  /* ── slides wrapper ── */
+  #deck {
+    width: 100%; height: 100vh;
+    position: relative; overflow: hidden;
+  }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 60px 80px;
+    opacity: 0; transform: translateX(60px);
+    transition: opacity .35s ease, transform .35s ease;
+    pointer-events: none;
+  }
+  .slide.active {
+    opacity: 1; transform: translateX(0);
+    pointer-events: auto;
+  }
+  .slide.exit {
+    opacity: 0; transform: translateX(-60px);
+  }
+
+  /* ── layouts ── */
+  .slide.layout-title   { text-align: center; }
+  .slide.layout-split   { flex-direction: row; gap: 48px; align-items: flex-start; padding-top: 80px; }
+  .slide.layout-full    { padding: 40px 60px; }
+  .slide.layout-grid    { flex-direction: column; }
+
+  /* ── typography ── */
+  .eyebrow {
+    font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--neo4j); margin-bottom: 12px; font-weight: 600;
+  }
+  h1 { font-size: clamp(2rem, 4vw, 3.2rem); line-height: 1.15; font-weight: 700; }
+  h2 { font-size: clamp(1.4rem, 2.5vw, 2rem); font-weight: 700; margin-bottom: 20px; }
+  h3 { font-size: 1rem; font-weight: 600; color: var(--neo4j); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+  p, li { font-size: clamp(.85rem, 1.3vw, 1rem); line-height: 1.7; color: var(--muted); }
+  .lead { font-size: clamp(1rem, 1.6vw, 1.25rem); color: var(--text); line-height: 1.6; }
+
+  /* ── title slide decorations ── */
+  .title-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(1,139,255,.15); border: 1px solid rgba(1,139,255,.4);
+    padding: 6px 16px; border-radius: 20px;
+    font-size: 13px; color: var(--neo4j); margin-bottom: 28px;
+  }
+  .title-badge svg { width:16px; height:16px; }
+
+  .version-chips { display: flex; gap: 10px; justify-content: center; margin-top: 32px; flex-wrap: wrap; }
+  .chip {
+    background: var(--bg3); border: 1px solid var(--border);
+    padding: 4px 14px; border-radius: 12px;
+    font-size: 12px; color: var(--muted);
+  }
+  .chip strong { color: var(--text); }
+
+  /* ── screenshot ── */
+  .screenshot {
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 32px rgba(0,0,0,.6);
+    max-height: 65vh; max-width: 100%;
+    object-fit: contain;
+  }
+  .screenshot-frame {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,.6);
+  }
+  .screenshot-frame .titlebar {
+    background: var(--bg3); padding: 8px 14px;
+    display: flex; align-items: center; gap: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dot { width:10px; height:10px; border-radius:50%; }
+  .dot.r { background:#ff5f57; }
+  .dot.y { background:#ffbd2e; }
+  .dot.g { background:#28c941; }
+  .screenshot-frame img { display:block; width:100%; max-height: 58vh; object-fit: contain; }
+
+  /* ── code blocks ── */
+  pre {
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 8px; padding: 18px 20px;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: clamp(.7rem, 1.1vw, .85rem);
+    line-height: 1.6; overflow-x: auto;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .kw  { color: #ff7b72; }   /* keywords */
+  .fn  { color: #d2a8ff; }   /* functions */
+  .str { color: #a5d6ff; }   /* strings */
+  .rel { color: #ffa657; }   /* relationship types */
+  .cmt { color: var(--muted); font-style: italic; }
+  .hl  { color: var(--green); font-weight: 600; }
+
+  /* ── split layout columns ── */
+  .col { flex: 1; min-width: 0; }
+  .col-text { max-width: 380px; flex: 0 0 380px; }
+
+  /* ── bullet list ── */
+  ul.bullets { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+  ul.bullets li::before { content: "▸ "; color: var(--neo4j); font-weight: 700; }
+
+  /* ── comparison table ── */
+  table.cmp {
+    width: 100%; border-collapse: collapse;
+    font-size: clamp(.75rem, 1.1vw, .9rem);
+  }
+  table.cmp th {
+    background: var(--bg3); color: var(--neo4j);
+    padding: 10px 16px; text-align: left;
+    border-bottom: 2px solid var(--neo4j);
+    font-size: .8rem; letter-spacing: 1px; text-transform: uppercase;
+  }
+  table.cmp td {
+    padding: 9px 16px; border-bottom: 1px solid var(--border);
+    color: var(--muted); vertical-align: top;
+  }
+  table.cmp tr:hover td { background: var(--bg3); }
+  table.cmp td:first-child { color: var(--text); font-weight: 600; }
+  .yes { color: var(--green); font-weight: 700; }
+  .no  { color: var(--red); }
+  .ok  { color: var(--yellow); }
+
+  /* ── domain diagram ── */
+  .diagram {
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px 32px;
+    font-family: monospace; font-size: .85rem; line-height: 2;
+    color: var(--text);
+  }
+  .diagram .node-c { color: #79c0ff; }
+  .diagram .node-z { color: #56d364; }
+  .diagram .node-e { color: #ff7b72; }
+  .diagram .node-i { color: #ffa657; }
+  .diagram .node-q { color: #d2a8ff; }
+  .diagram .node-s { color: var(--cyan); }
+  .diagram .rel2   { color: var(--yellow); }
+  .diagram .arr    { color: var(--muted); }
+
+  /* ── GDS card grid ── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px; width: 100%;
+  }
+  .gds-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+  }
+  .gds-card .name { color: var(--purple); font-family: monospace; font-size: .8rem; margin-bottom: 6px; }
+  .gds-card .desc { color: var(--muted); font-size: .8rem; line-height: 1.5; }
+
+  /* ── use-case boxes ── */
+  .uc-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 16px; width: 100%;
+  }
+  .uc-box {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 20px;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .uc-icon { font-size: 1.4rem; flex-shrink: 0; }
+  .uc-box h4 { color: var(--text); font-size: .9rem; margin-bottom: 4px; }
+  .uc-box p  { font-size: .8rem; }
+
+  /* ── footer slide ── */
+  .links { display: flex; gap: 20px; margin-top: 32px; flex-wrap: wrap; justify-content: center; }
+  .link-btn {
+    background: var(--bg3); border: 1px solid var(--border);
+    padding: 10px 20px; border-radius: 8px;
+    font-size: .85rem; color: var(--neo4j);
+    text-decoration: none; transition: border-color .2s;
+  }
+  .link-btn:hover { border-color: var(--neo4j); background: rgba(1,139,255,.1); }
+
+  /* ── kbd hints ── */
+  #hints {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; z-index: 100;
+  }
+  kbd {
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 4px; padding: 2px 8px;
+    font-size: 11px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<div id="progress"></div>
+<div id="counter">1 / 15</div>
+<button class="nav" id="prev">‹</button>
+<button class="nav" id="next">›</button>
+<div id="hints"><kbd>←</kbd><kbd>→</kbd><kbd>Space</kbd></div>
+
+<div id="deck">
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 1 — Título
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-title active">
+  <div class="title-badge">
+    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/></svg>
+    Proof of Concept
+  </div>
+  <h1>Neo4j</h1>
+  <h1 style="color:var(--neo4j)">Base de datos orientada a grafos</h1>
+  <p class="lead" style="max-width:600px;margin-top:20px">
+    Exploración completa: modelo de datos, Cypher, algoritmos GDS<br>
+    e integración Python. Dominio: catálogo RPG.
+  </p>
+  <div class="version-chips">
+    <div class="chip">Neo4j <strong>5.26</strong></div>
+    <div class="chip">GDS <strong>2.13</strong> · 446 algoritmos</div>
+    <div class="chip">Community Edition</div>
+    <div class="chip">Docker</div>
+    <div class="chip">Python driver</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 2 — ¿Qué es Neo4j?
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Concepto</div>
+    <h2>¿Qué es una base de datos de grafos?</h2>
+    <p class="lead" style="margin-bottom:20px">
+      Los datos se almacenan como <strong style="color:var(--neo4j)">nodos</strong>
+      conectados por <strong style="color:var(--yellow)">relaciones</strong>,
+      cada uno con <strong style="color:var(--green)">propiedades</strong>.
+    </p>
+    <ul class="bullets">
+      <li>Traversal nativo: O(camino), no O(tabla)</li>
+      <li>Sin JOINs — las conexiones son de primera clase</li>
+      <li>Esquema opcional — flexible por diseño</li>
+      <li>Cypher: lenguaje declarativo orientado a patrones</li>
+    </ul>
+  </div>
+  <div class="col">
+    <table class="cmp">
+      <thead>
+        <tr><th>Aspecto</th><th>Neo4j</th><th>PostgreSQL</th><th>MongoDB</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Modelo</td><td class="yes">Grafo</td><td class="ok">Tablas</td><td class="ok">Documentos</td></tr>
+        <tr><td>Traversal profundo</td><td class="yes">Nativo</td><td class="no">JOINs recursivos</td><td class="no">Limitado</td></tr>
+        <tr><td>Shortest path</td><td class="yes">Built-in</td><td class="no">pgRouting ext.</td><td class="no">No nativo</td></tr>
+        <tr><td>Algoritmos grafo</td><td class="yes">GDS plugin</td><td class="no">No</td><td class="no">No</td></tr>
+        <tr><td>Esquema</td><td class="yes">Opcional</td><td class="no">Rígido</td><td class="yes">Flexible</td></tr>
+        <tr><td>Recomendaciones</td><td class="yes">Nativo</td><td class="ok">Con joins</td><td class="ok">Con lookups</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 3 — Dominio RPG
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Dataset</div>
+    <h2>Catálogo RPG</h2>
+    <p style="margin-bottom:20px">Un mundo RPG modelado como grafo: personajes, clases, habilidades, zonas, enemigos, items y quests.</p>
+    <ul class="bullets">
+      <li><strong style="color:#79c0ff">10</strong> Personajes (nivel 10–20)</li>
+      <li><strong style="color:var(--cyan)">12</strong> Habilidades (2 por clase + 2 universales)</li>
+      <li><strong style="color:#56d364">7</strong> Zonas interconectadas</li>
+      <li><strong style="color:#ff7b72">6</strong> Enemigos distribuidos por zona</li>
+      <li><strong style="color:#ffa657">7</strong> Items (común→legendario)</li>
+      <li><strong style="color:#d2a8ff">5</strong> Quests con recompensas</li>
+    </ul>
+  </div>
+  <div class="col">
+    <div class="diagram">
+<span class="node-c">(Character)</span><span class="arr">-[</span><span class="rel2">:BELONGS_TO</span><span class="arr">]-&gt;</span><span class="node-c">(Class)</span>
+<span class="node-c">(Character)</span><span class="arr">-[</span><span class="rel2">:KNOWS</span><span class="arr">]-&gt;</span>     <span class="node-s">(Skill)</span>
+<span class="node-c">(Character)</span><span class="arr">-[</span><span class="rel2">:VISITS</span><span class="arr">]-&gt;</span>    <span class="node-z">(Zone)</span>
+<span class="node-c">(Character)</span><span class="arr">-[</span><span class="rel2">:COMPLETES</span><span class="arr">]-&gt;</span> <span class="node-q">(Quest)</span>
+<span class="node-z">(Zone)</span>     <span class="arr">-[</span><span class="rel2">:CONNECTS_TO</span><span class="arr">]-&gt;</span><span class="node-z">(Zone)</span>
+<span class="node-z">(Zone)</span>     <span class="arr">-[</span><span class="rel2">:CONTAINS</span><span class="arr">]-&gt;</span>  <span class="node-e">(Enemy)</span>
+<span class="node-e">(Enemy)</span>    <span class="arr">-[</span><span class="rel2">:DROPS</span><span class="arr">]-&gt;</span>     <span class="node-i">(Item)</span>
+<span class="node-q">(Quest)</span>    <span class="arr">-[</span><span class="rel2">:REWARDS</span><span class="arr">]-&gt;</span>    <span class="node-i">(Item)</span>
+<span class="node-q">(Quest)</span>    <span class="arr">-[</span><span class="rel2">:TAKES_PLACE_IN</span><span class="arr">]-&gt;</span><span class="node-z">(Zone)</span>
+    </div>
+    <p style="margin-top:12px;font-size:.8rem">~60 nodos · ~150 relaciones tras el seed</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 4 — Login
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Neo4j Browser</div>
+    <h2>Consola web</h2>
+    <p class="lead" style="margin-bottom:16px">Interfaz oficial para explorar el grafo. React SPA que funciona sobre Bolt (puerto 7687).</p>
+    <ul class="bullets">
+      <li>Editor Cypher con autocompletado</li>
+      <li>Visualización D3.js interactiva</li>
+      <li>Vista tabla / grafo / código</li>
+      <li>Panel <code style="color:var(--neo4j)">:sysinfo</code> de métricas</li>
+    </ul>
+    <pre style="margin-top:20px"><span class="cmt">-- URL de acceso local</span>
+http://localhost:7474
+
+<span class="cmt">-- En la LAN</span>
+http://192.168.1.135:7474</pre>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/01-login.png" alt="Login Neo4j Browser">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 5 — Esquema
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Modelo de datos</div>
+    <h2>Esquema del grafo</h2>
+    <p style="margin-bottom:16px">Neo4j infiere el esquema dinámicamente. Este procedimiento lo visualiza.</p>
+    <pre><span class="fn">CALL</span> db.schema.visualization()</pre>
+    <ul class="bullets" style="margin-top:16px">
+      <li>Burbujas = tipos de nodo (labels)</li>
+      <li>Flechas = tipos de relación</li>
+      <li>No declaras tablas con antelación</li>
+      <li>Los constraints son opcionales</li>
+    </ul>
+    <p style="margin-top:16px;font-size:.85rem">
+      Equivalente al ERD en SQL, pero emergente — el esquema <em>es</em> los datos.
+    </p>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/02-schema.png" alt="Schema visualization">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 6 — Grafo completo
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Visualización</div>
+    <h2>Grafo RPG completo</h2>
+    <pre><span class="kw">MATCH</span> (n)<span class="arr">-[</span>r<span class="arr">]-&gt;</span>(m)
+<span class="kw">RETURN</span> n, r, m <span class="kw">LIMIT</span> <span class="hl">80</span></pre>
+    <ul class="bullets" style="margin-top:16px">
+      <li>Cada color = tipo de nodo distinto</li>
+      <li>Clic en nodo → propiedades</li>
+      <li>Doble clic → expande vecinos</li>
+      <li>Arrastrar → reorganiza layout</li>
+      <li>Scroll → zoom</li>
+    </ul>
+    <p style="margin-top:16px;font-size:.85rem">
+      La visualización usa <strong>D3.js</strong> con simulación de fuerzas.
+      Los nodos más conectados se posicionan al centro.
+    </p>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/03-full-graph.png" alt="Full graph">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 7 — Seraphia
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Traversal</div>
+    <h2>Explorar un nodo</h2>
+    <pre><span class="kw">MATCH</span> (c:<span class="fn">Character</span> {name:<span class="str">'Seraphia'</span>})
+      <span class="arr">-[</span>r<span class="arr">]-</span>(n)
+<span class="kw">RETURN</span> c, r, n</pre>
+    <p style="margin-top:14px;margin-bottom:14px">Todos los vecinos directos de Seraphia: clase, habilidades, zonas visitadas y quests completadas.</p>
+    <ul class="bullets">
+      <li><code>-[r]-</code> sin dirección → ambos sentidos</li>
+      <li><code>-[r]-&gt;</code> dirigido → solo salientes</li>
+      <li>Filtra por tipo: <code>-[r:<span class="rel">KNOWS</span>]-&gt;</code></li>
+    </ul>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/04-seraphia.png" alt="Seraphia connections">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 8 — Mapa de zonas
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Grafos de conectividad</div>
+    <h2>Red de zonas</h2>
+    <pre><span class="kw">MATCH</span> (a:<span class="fn">Zone</span>)
+  <span class="arr">-[</span>r:<span class="rel">CONNECTS_TO</span><span class="arr">]-&gt;</span>
+    (b:<span class="fn">Zone</span>)
+<span class="kw">RETURN</span> a, r, b</pre>
+    <p style="margin-top:14px">El mapa del mundo como grafo de rutas transitables. Ideal para calcular accesibilidad y progresión.</p>
+    <pre style="margin-top:14px"><span class="cmt">-- Zonas a distancia ≤3 desde la Aldea</span>
+<span class="kw">MATCH</span> (s:<span class="fn">Zone</span> {name:<span class="str">'Aldea Inicial'</span>})
+  <span class="arr">-[</span>:<span class="rel">CONNECTS_TO</span>*1..3<span class="arr">]-</span>(z)
+<span class="kw">RETURN</span> <span class="fn">DISTINCT</span> z.name, z.level</pre>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/05-zone-network.png" alt="Zone network">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 9 — Shortest Path
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Algoritmos built-in</div>
+    <h2>Camino más corto</h2>
+    <pre><span class="kw">MATCH</span>
+  (a:<span class="fn">Zone</span> {name:<span class="str">'Aldea Inicial'</span>}),
+  (b:<span class="fn">Zone</span> {name:<span class="str">'Torre del Mago'</span>})
+<span class="kw">MATCH</span> p = <span class="fn">shortestPath</span>(
+  (a)<span class="arr">-[</span>:<span class="rel">CONNECTS_TO</span>*<span class="arr">]-</span>(b)
+)
+<span class="kw">RETURN</span> p</pre>
+    <ul class="bullets" style="margin-top:14px">
+      <li><code>shortestPath()</code> → camino óptimo único</li>
+      <li><code>allShortestPaths()</code> → todos los óptimos</li>
+      <li><code>[:R*1..4]</code> → limitar profundidad</li>
+      <li>GDS Dijkstra → rutas con peso</li>
+    </ul>
+    <p style="margin-top:14px;font-size:.85rem">En SQL necesitarías una CTE recursiva o pgRouting. En Neo4j es una función de primera clase.</p>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/06-shortest-path.png" alt="Shortest path">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 10 — Tabla
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Cypher — vista tabular</div>
+    <h2>Consultas relacionales</h2>
+    <pre><span class="kw">MATCH</span> (c:<span class="fn">Character</span>)
+  <span class="arr">-[</span>:<span class="rel">BELONGS_TO</span><span class="arr">]-&gt;</span>
+    (cl:<span class="fn">Class</span>)
+<span class="kw">RETURN</span>
+  c.name  <span class="kw">AS</span> Nombre,
+  c.level <span class="kw">AS</span> Nivel,
+  c.hp    <span class="kw">AS</span> HP,
+  cl.name <span class="kw">AS</span> Clase
+<span class="kw">ORDER BY</span> c.level <span class="kw">DESC</span></pre>
+    <p style="margin-top:14px;font-size:.85rem">Cypher tiene <code>ORDER BY</code>, <code>LIMIT</code>, <code>SKIP</code>, <code>WHERE</code>, <code>WITH</code>, <code>UNWIND</code>, <code>CASE</code>, <code>count()</code>, <code>collect()</code>, <code>sum()</code>…</p>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/07-character-table.png" alt="Character ranking">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 11 — Loot chain
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Traversal multi-hop</div>
+    <h2>Cadena zona→enemigo→item</h2>
+    <pre><span class="kw">MATCH</span>
+  (z:<span class="fn">Zone</span>)
+  <span class="arr">-[</span>:<span class="rel">CONTAINS</span><span class="arr">]-&gt;</span>(e:<span class="fn">Enemy</span>)
+  <span class="arr">-[</span>:<span class="rel">DROPS</span><span class="arr">]-&gt;</span>   (i:<span class="fn">Item</span>)
+<span class="kw">RETURN</span>
+  z.name <span class="kw">AS</span> Zona,
+  e.name <span class="kw">AS</span> Enemigo,
+  i.name <span class="kw">AS</span> Item,
+  i.rarity <span class="kw">AS</span> Rareza
+<span class="kw">ORDER BY</span> i.rarity</pre>
+    <p style="margin-top:14px;font-size:.85rem">3 niveles de profundidad, cero JOINs explícitos. El patrón Cypher <em>es</em> la consulta.</p>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/08-loot-chain.png" alt="Loot chain">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 12 — Filtrado colaborativo
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Recomendaciones</div>
+    <h2>Filtrado colaborativo</h2>
+    <pre><span class="kw">MATCH</span>
+  (yo:<span class="fn">Character</span> {name:<span class="str">'Aldric'</span>})
+  <span class="arr">-[</span>:<span class="rel">COMPLETES</span><span class="arr">]-&gt;</span>(q:<span class="fn">Quest</span>)
+  <span class="arr">&lt;-[</span>:<span class="rel">COMPLETES</span><span class="arr">]-</span>(similar)
+  <span class="arr">-[</span>:<span class="rel">COMPLETES</span><span class="arr">]-&gt;</span>(nueva:<span class="fn">Quest</span>)
+<span class="kw">WHERE NOT</span> (yo)<span class="arr">-[</span>:<span class="rel">COMPLETES</span><span class="arr">]-&gt;</span>(nueva)
+<span class="kw">RETURN</span>
+  nueva.name <span class="kw">AS</span> Quest,
+  <span class="fn">count</span>(<span class="kw">DISTINCT</span> similar) <span class="kw">AS</span> Score
+<span class="kw">ORDER BY</span> Score <span class="kw">DESC</span></pre>
+    <p style="margin-top:12px;font-size:.8rem">El mismo patrón detrás de Netflix, Amazon y Spotify — resuelto en 8 líneas de Cypher.</p>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/09-collab-filter.png" alt="Collaborative filter">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 13 — GDS PageRank
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-split">
+  <div class="col col-text">
+    <div class="eyebrow">Graph Data Science</div>
+    <h2>GDS — PageRank</h2>
+    <pre><span class="cmt">-- 1. Proyectar grafo en RAM</span>
+<span class="fn">CALL</span> gds.graph.project(
+  <span class="str">'mi_grafo'</span>, [...labels], {...rels}
+)
+
+<span class="cmt">-- 2. Ejecutar algoritmo</span>
+<span class="fn">CALL</span> gds.pageRank.stream(
+  <span class="str">'mi_grafo'</span>,
+  {maxIterations: <span class="hl">20</span>,
+   dampingFactor: <span class="hl">0.85</span>}
+) <span class="kw">YIELD</span> nodeId, score</pre>
+    <div class="card-grid" style="margin-top:14px;grid-template-columns:repeat(2,1fr);gap:8px">
+      <div class="gds-card"><div class="name">gds.betweenness</div><div class="desc">Nodos "puente" críticos</div></div>
+      <div class="gds-card"><div class="name">gds.louvain</div><div class="desc">Detección comunidades</div></div>
+      <div class="gds-card"><div class="name">gds.nodeSimilarity</div><div class="desc">Similitud Jaccard</div></div>
+      <div class="gds-card"><div class="name">gds.knn</div><div class="desc">K vecinos cercanos</div></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="screenshot-frame">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <img src="screenshots/10-pagerank.png" alt="PageRank GDS">
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 14 — Casos de uso reales
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-grid" style="justify-content:flex-start;padding-top:70px">
+  <div class="eyebrow">Aplicaciones reales</div>
+  <h2 style="margin-bottom:24px">¿Cuándo usar Neo4j?</h2>
+  <div class="uc-grid">
+    <div class="uc-box"><span class="uc-icon">🕸️</span><div><h4>Redes sociales</h4><p>Seguidores, amigos, influencers, comunidades, propagación viral</p></div></div>
+    <div class="uc-box"><span class="uc-icon">🎯</span><div><h4>Recomendaciones</h4><p>Filtrado colaborativo, "usuarios como tú también compraron", contenido similar</p></div></div>
+    <div class="uc-box"><span class="uc-icon">🔍</span><div><h4>Detección de fraude</h4><p>Patrones en transacciones, anillos de fraude, cuentas relacionadas</p></div></div>
+    <div class="uc-box"><span class="uc-icon">🧠</span><div><h4>Knowledge graphs</h4><p>Grafos de conocimiento, ontologías, motores de búsqueda semántica</p></div></div>
+    <div class="uc-box"><span class="uc-icon">🏗️</span><div><h4>Dependencias de infra</h4><p>Análisis de impacto, propagación de fallos, CMDB, microservicios</p></div></div>
+    <div class="uc-box"><span class="uc-icon">🚚</span><div><h4>Cadena de suministro</h4><p>Rutas óptimas, cuellos de botella, trazabilidad de origen</p></div></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SLIDE 15 — Cierre
+═══════════════════════════════════════════════════════════ -->
+<section class="slide layout-title">
+  <div class="eyebrow">Conclusión</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.5rem);margin-bottom:16px">
+    Neo4j brilla donde las relaciones<br>
+    <span style="color:var(--neo4j)">son</span> los datos
+  </h2>
+  <p class="lead" style="max-width:560px;margin-bottom:28px">
+    Si tu dominio tiene conexiones ricas y necesitas traversal profundo,
+    caminos, comunidades o recomendaciones — Neo4j es la herramienta correcta.
+  </p>
+  <div style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;margin-bottom:32px">
+    <div style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--neo4j)">446</div>
+      <div style="font-size:.8rem;color:var(--muted)">algoritmos GDS</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--green)">0</div>
+      <div style="font-size:.8rem;color:var(--muted)">JOINs necesarios</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--purple)">O(camino)</div>
+      <div style="font-size:.8rem;color:var(--muted)">complejidad traversal</div>
+    </div>
+  </div>
+  <div class="links">
+    <a class="link-btn" href="http://localhost:7474" target="_blank">Neo4j Browser</a>
+    <a class="link-btn" href="manual.md">Manual completo</a>
+    <a class="link-btn" href="https://github.com/monghithub/pocNeo4J" target="_blank">Repo GitHub</a>
+    <a class="link-btn" href="https://neo4j.com/docs/cypher-manual/" target="_blank">Cypher docs</a>
+  </div>
+</section>
+
+</div><!-- /deck -->
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const total  = slides.length;
+let cur = 0;
+
+function go(n) {
+  slides[cur].classList.remove('active');
+  slides[cur].classList.add('exit');
+  setTimeout(() => slides[cur].classList.remove('exit'), 400);
+
+  cur = (n + total) % total;
+  slides[cur].classList.add('active');
+
+  document.getElementById('counter').textContent = `${cur + 1} / ${total}`;
+  document.getElementById('progress').style.width = `${((cur + 1) / total) * 100}%`;
+}
+
+document.getElementById('next').addEventListener('click', () => go(cur + 1));
+document.getElementById('prev').addEventListener('click', () => go(cur - 1));
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); go(cur + 1); }
+  if (e.key === 'ArrowLeft')                   { e.preventDefault(); go(cur - 1); }
+  if (e.key === 'Home')                        { e.preventDefault(); go(0); }
+  if (e.key === 'End')                         { e.preventDefault(); go(total - 1); }
+});
+
+// Init progress bar
+document.getElementById('progress').style.width = `${(1 / total) * 100}%`;
+</script>
+</body>
+</html>
