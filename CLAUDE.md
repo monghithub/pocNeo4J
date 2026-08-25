@@ -22,7 +22,7 @@ independiente: `git@github.com:monghithub/pocNeo4J.git`, excluido del git de tit
 docker compose down -v
 ```
 
-Neo4j Browser: `http://localhost:7474` · LAN: `http://192.168.1.135:7474`
+Neo4j Browser: `http://localhost:7474` · LAN: `http://192.168.0.42:7474`
 Credenciales: `neo4j` / `titanpoc` · Bolt: `bolt://localhost:7687`
 
 ## Entorno Python
